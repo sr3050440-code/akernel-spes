@@ -20,17 +20,16 @@ jobs:
         sudo apt-get install -y --no-install-recommends \
           build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python3 python-is-python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler zip unzip
 
-    - name: Restore Proton Clang Cache
-      id: restore-clang
-      uses: actions/cache/restore@v4
+    - name: Cache Proton Clang Toolchain
+      uses: actions/cache@v4
       with:
         path: ~/clang
-        key: proton-clang-spes-v1
+        key: proton-clang-spes-v2
 
     - name: Setup Proton Clang Toolchain
       run: |
         if [ ! -f "$HOME/clang/bin/clang" ]; then
-          echo "Clang missing from cache. Downloading..."
+          echo "Downloading Proton Clang..."
           rm -rf ~/clang
           mkdir -p ~/clang
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
@@ -38,40 +37,14 @@ jobs:
           echo "Proton Clang loaded directly from Cache!"
         fi
 
-    - name: Force Save Proton Clang Cache
-      uses: actions/cache/save@v4
-      if: always() && steps.restore-clang.outputs.cache-hit != 'true'
-      with:
-        path: ~/clang
-        key: proton-clang-spes-v1
-
-    - name: Restore ccache Compilation Objects
-      uses: actions/cache/restore@v4
-      with:
-        path: ~/.ccache
-        key: ccache-spes-static
-
-    - name: Fix Kconfig & Inject Serial Lock (cd7276a2)
+    - name: Fix Kconfig & Apply Serial Lock (cd7276a2)
       run: |
+        # Missing Kconfig File Auto-Fix
         mkdir -p drivers/net/wireless/realtek/rt38821cs
         touch drivers/net/wireless/realtek/rt38821cs/Kconfig
 
-        python3 -c '
-        with open("init/main.c", "r") as f:
-            content = f.read()
-
-        if "cd7276a2" not in content:
-            import re
-            pattern = r"(static\s+noinline\s+void\s+__init\s+kernel_init_freeable\s*\(\s*void\s*\)\s*\{)"
-            replacement = r"\1\n\tif (!strstr(saved_cmdline, \"cd7276a2\")) {\n\t\tpanic(\"Unauthorized Hardware! Serial mismatch.\");\n\t}"
-            if re.search(pattern, content):
-                content = re.sub(pattern, replacement, content, count=1)
-            else:
-                content = content.replace("kernel_init_freeable(void)\n{", "kernel_init_freeable(void)\n{\n\tif (!strstr(saved_cmdline, \"cd7276a2\")) {\n\t\tpanic(\"Unauthorized Hardware! Serial mismatch.\");\n\t}")
-
-        with open("init/main.c", "w") as f:
-            f.write(content)
-        '
+        # Direct, reliable C injection via sed
+        sed -i '/setup_arch(&command_line);/a \    if (!strstr(boot_command_line, "cd7276a2")) { panic("Unauthorized Hardware! Serial mismatch."); }' init/main.c
 
     - name: Build Kernel Image
       run: |
@@ -97,13 +70,6 @@ jobs:
           KCFLAGS="-w -Wno-error" \
           KCPPFLAGS="-w" \
           Image.gz
-
-    - name: Force Save ccache Compilation Objects
-      uses: actions/cache/save@v4
-      if: always()
-      with:
-        path: ~/.ccache
-        key: ccache-spes-static
 
     - name: Upload Kernel Artifact
       uses: actions/upload-artifact@v4
