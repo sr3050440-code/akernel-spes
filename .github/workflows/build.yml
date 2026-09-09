@@ -44,12 +44,12 @@ jobs:
         ccache -M 5G
         
         mkdir -p out
-        DEFCONFIG="vendor/spes-perf_defconfig"
+        DEFCONFIG="stock_defconfig"
         
         echo "Using Defconfig: $DEFCONFIG"
         make -j$(nproc --all) O=out ARCH=arm64 "$DEFCONFIG"
         
-        # Set Custom Kernel Name (Sitanshu)
+        # Custom Kernel Name (Sitanshu)
         scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu"
         scripts/config --file out/.config --disable IKHEADERS || true
         
