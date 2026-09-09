@@ -1,0 +1,63 @@
+name: Build Redmi Note 11 (spes) Sitanshu Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout Kernel Source
+      uses: actions/checkout@v4
+
+    - name: Set up Build Environment
+      run: |
+        sudo apt-get update || true
+        sudo apt-get install -y --no-install-recommends \
+          build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python2 python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+    - name: Enable GitHub Build Cache (1-2 Min Re-builds)
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ccache-${{ runner.os }}-${{ github.sha }}
+        restore-keys: |
+          ccache-${{ runner.os }}-
+
+    - name: Setup Clang Toolchain
+      run: |
+        mkdir -p ~/clang
+        wget -q https://github.com/ZyCromerZ/Clang/releases/download/20.0.0-20250101-release/Clang-20.0.0-20250101.tar.gz
+        tar -xf Clang-*.tar.gz -C ~/clang
+        rm Clang-*.tar.gz
+
+    - name: Apply Serial Lock (cd7276a2)
+      run: |
+        sed -i '/kernel_init_freeable(void)/a \    if (!strstr(saved_cmdline, "cd7276a2")) { panic("Unauthorized Hardware! Serial mismatch."); }' init/main.c
+
+    - name: Build Kernel
+      run: |
+        export PATH="$HOME/clang/bin:$PATH"
+        export USE_CCACHE=1
+        export CCACHE_DIR="$HOME/.ccache"
+        ccache -M 5G
+        
+        mkdir -p out
+        DEFCONFIG="vendor/spes-perf_defconfig"
+        
+        echo "Using Defconfig: $DEFCONFIG"
+        make -j$(nproc --all) O=out ARCH=arm64 "$DEFCONFIG"
+        
+        # Set Custom Kernel Name (Sitanshu)
+        scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu"
+        scripts/config --file out/.config --disable IKHEADERS || true
+        
+        make -j$(nproc --all) O=out ARCH=arm64 CC="ccache clang" LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+    - name: Upload Kernel Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: RedmiNote11-Sitanshu-Locked-Kernel
+        path: out/arch/arm64/boot/
+        
