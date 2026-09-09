@@ -8,8 +8,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout Kernel Source
+    - name: Checkout Kernel Source (With Submodules)
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+        submodules: 'recursive'
 
     - name: Set up Build Environment
       run: |
@@ -17,21 +20,27 @@ jobs:
         sudo apt-get install -y --no-install-recommends \
           build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python2 python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-    - name: Enable GitHub Build Cache (1-2 Min Re-builds)
+    - name: Enable GitHub Build Cache (Save Progress Always)
       uses: actions/cache@v4
       with:
         path: ~/.ccache
         key: ccache-${{ runner.os }}-${{ github.sha }}
         restore-keys: |
           ccache-${{ runner.os }}-
+        save-always: true
 
     - name: Setup Clang Toolchain (Proton Clang)
       run: |
         mkdir -p ~/clang
         git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
 
-    - name: Apply Serial Lock (cd7276a2)
+    - name: Fix Missing Kconfig & Apply Serial Lock (cd7276a2)
       run: |
+        # Missing Kconfig File Auto-Fix
+        mkdir -p drivers/net/wireless/realtek/rt38821cs
+        touch drivers/net/wireless/realtek/rt38821cs/Kconfig
+        
+        # Inject Serial Lock
         sed -i '/kernel_init_freeable(void)/a \    if (!strstr(saved_cmdline, "cd7276a2")) { panic("Unauthorized Hardware! Serial mismatch."); }' init/main.c
 
     - name: Build Kernel
