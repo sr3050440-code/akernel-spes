@@ -18,40 +18,40 @@ jobs:
       run: |
         sudo apt-get update || true
         sudo apt-get install -y --no-install-recommends \
-          build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python2 python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler
+          build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python2 python3 python-is-python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler zip unzip
 
-    - name: Cache Proton Clang Toolchain (Instant Restore)
-      id: cache-clang
+    - name: Permanent Clang Cache
       uses: actions/cache@v4
       with:
         path: ~/clang
-        key: proton-clang-v1
+        key: proton-clang-v1-permanent
 
-    - name: Cache Kernel Compilation Objects (ccache)
+    - name: Permanent Compilation Cache (ccache)
       uses: actions/cache@v4
       with:
         path: ~/.ccache
-        key: ccache-${{ runner.os }}-${{ github.sha }}
+        key: ccache-spes-v1-permanent
         restore-keys: |
-          ccache-${{ runner.os }}-
+          ccache-spes-v1-
 
-    - name: Setup Clang Toolchain (Proton Clang)
+    - name: Setup Proton Clang (Fast Check)
       run: |
-        if [ ! -d "$HOME/clang/bin" ]; then
-          echo "Clang not cached. Downloading Proton Clang..."
+        if [ ! -f "$HOME/clang/bin/clang" ]; then
+          echo "Toolchain missing from cache. Downloading..."
+          rm -rf ~/clang
           mkdir -p ~/clang
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
         else
-          echo "Clang restored successfully from Cache!"
+          echo "Proton Clang loaded directly from Cache in 0 seconds!"
         fi
 
     - name: Fix Missing Kconfig & Apply Serial Lock (cd7276a2)
       run: |
-        # Missing Kconfig File Auto-Fix
+        # Fix missing driver Kconfig
         mkdir -p drivers/net/wireless/realtek/rt38821cs
         touch drivers/net/wireless/realtek/rt38821cs/Kconfig
-        
-        # Inject Serial Lock safely into init/main.c via Python
+
+        # Clean serial lock injection into init/main.c
         python3 -c '
         with open("init/main.c", "r") as f:
             content = f.read()
@@ -67,31 +67,31 @@ jobs:
             f.write(content)
         '
 
-    - name: Build Kernel
+    - name: Compile Kernel
       run: |
         export PATH="$HOME/clang/bin:$PATH"
         export USE_CCACHE=1
         export CCACHE_DIR="$HOME/.ccache"
-        ccache -M 5G
-        
+        ccache -M 10G
+
         mkdir -p out
         DEFCONFIG="stock_defconfig"
-        
-        echo "Using Defconfig: $DEFCONFIG"
+
         make -j$(nproc --all) O=out ARCH=arm64 "$DEFCONFIG"
-        
-        # Custom Kernel Name (Sitanshu)
+
+        # Set custom kernel name (-Sitanshu)
         scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu"
         scripts/config --file out/.config --disable IKHEADERS || true
-        
-        # Fix: Qualcomm 4.19 Optimized Clang Flags
+
+        # Clean Make Command without strict warnings breaking build
         make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC="ccache clang" \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-          KCFLAGS="-w"
+          KCFLAGS="-w -Wno-error" \
+          KCPPFLAGS="-w"
 
     - name: Upload Kernel Artifact
       uses: actions/upload-artifact@v4
