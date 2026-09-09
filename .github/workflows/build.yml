@@ -25,12 +25,10 @@ jobs:
         restore-keys: |
           ccache-${{ runner.os }}-
 
-    - name: Setup Clang Toolchain
+    - name: Setup Clang Toolchain (Proton Clang)
       run: |
         mkdir -p ~/clang
-        wget -q https://github.com/ZyCromerZ/Clang/releases/download/20.0.0-20250101-release/Clang-20.0.0-20250101.tar.gz
-        tar -xf Clang-*.tar.gz -C ~/clang
-        rm Clang-*.tar.gz
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
 
     - name: Apply Serial Lock (cd7276a2)
       run: |
