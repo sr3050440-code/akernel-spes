@@ -24,7 +24,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/clang
-        key: proton-clang-spes-v11
+        key: proton-clang-spes-v12
 
     - name: Setup Proton Clang Toolchain
       run: |
@@ -34,28 +34,22 @@ jobs:
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
         fi
 
-    - name: Fix Kconfig and Inject Standalone Serial Lock
+    - name: Fix Driver Kconfig and Inject Serial Lock
       run: |
-        # Missing Driver Kconfig Fix
-        mkdir -p drivers/net/wireless/realtek/rt38821cs
-        touch drivers/net/wireless/realtek/rt38821cs/Kconfig
+        # Auto-create all missing Kconfig files across wireless drivers
+        find drivers/net/wireless/ -type d -exec touch {}/Kconfig \; 2>/dev/null || true
 
-        # Create Isolated C File for Serial Check
-        echo '#include <linux/init.h>' > init/sitanshu_lock.c
-        echo '#include <linux/kernel.h>' >> init/sitanshu_lock.c
-        echo '#include <linux/string.h>' >> init/sitanshu_lock.c
-        echo 'extern char boot_command_line[];' >> init/sitanshu_lock.c
-        echo 'static int __init sitanshu_check_serial(void) {' >> init/sitanshu_lock.c
-        echo '    if (!strstr(boot_command_line, "cd7276a2")) {' >> init/sitanshu_lock.c
-        echo '        panic("Unauthorized Hardware! Serial mismatch.");' >> init/sitanshu_lock.c
-        echo '    }' >> init/sitanshu_lock.c
-        echo '    return 0;' >> init/sitanshu_lock.c
-        echo '}' >> init/sitanshu_lock.c
-        echo 'early_initcall(sitanshu_check_serial);' >> init/sitanshu_lock.c
-
-        # Link sitanshu_lock.o in Makefile
-        if ! grep -q "sitanshu_lock.o" init/Makefile; then
-          echo "obj-y += sitanshu_lock.o" >> init/Makefile
+        # Inject Hardware Serial Lock into arch/arm64/kernel/setup.c
+        if ! grep -q "cd7276a2" arch/arm64/kernel/setup.c; then
+          echo "" >> arch/arm64/kernel/setup.c
+          echo "/* Sitanshu Hardware Serial Lock */" >> arch/arm64/kernel/setup.c
+          echo "static int __init sitanshu_check_serial(void) {" >> arch/arm64/kernel/setup.c
+          echo "    if (!strstr(boot_command_line, \"cd7276a2\")) {" >> arch/arm64/kernel/setup.c
+          echo "        panic(\"Unauthorized Hardware! Serial mismatch.\");" >> arch/arm64/kernel/setup.c
+          echo "    }" >> arch/arm64/kernel/setup.c
+          echo "    return 0;" >> arch/arm64/kernel/setup.c
+          echo "}" >> arch/arm64/kernel/setup.c
+          echo "late_initcall(sitanshu_check_serial);" >> arch/arm64/kernel/setup.c
         fi
 
     - name: Build Kernel Image
@@ -69,7 +63,9 @@ jobs:
         make -j$(nproc --all) O=out ARCH=arm64 stock_defconfig
 
         scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu"
-        scripts/config --file out/.config --disable IKHEADERS || true
+        scripts/config --file out/.config --disable CONFIG_IKHEADERS || true
+        scripts/config --file out/.config --disable CONFIG_DEBUG_INFO_BTF || true
+        scripts/config --file out/.config --disable CONFIG_DEBUG_INFO || true
 
         make -j$(nproc --all) O=out \
           ARCH=arm64 \
