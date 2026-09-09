@@ -18,56 +18,62 @@ jobs:
       run: |
         sudo apt-get update || true
         sudo apt-get install -y --no-install-recommends \
-          build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python2 python3 python-is-python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler zip unzip
+          build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python3 python-is-python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler zip unzip
 
-    - name: Permanent Clang Cache
-      uses: actions/cache@v4
+    - name: Restore Proton Clang Cache
+      id: restore-clang
+      uses: actions/cache/restore@v4
       with:
         path: ~/clang
-        key: proton-clang-v1-permanent
+        key: proton-clang-spes-v1
 
-    - name: Permanent Compilation Cache (ccache)
-      uses: actions/cache@v4
-      with:
-        path: ~/.ccache
-        key: ccache-spes-v1-permanent
-        restore-keys: |
-          ccache-spes-v1-
-
-    - name: Setup Proton Clang (Fast Check)
+    - name: Setup Proton Clang Toolchain
       run: |
         if [ ! -f "$HOME/clang/bin/clang" ]; then
-          echo "Toolchain missing from cache. Downloading..."
+          echo "Clang missing from cache. Downloading..."
           rm -rf ~/clang
           mkdir -p ~/clang
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
         else
-          echo "Proton Clang loaded directly from Cache in 0 seconds!"
+          echo "Proton Clang loaded directly from Cache!"
         fi
 
-    - name: Fix Missing Kconfig & Apply Serial Lock (cd7276a2)
+    - name: Force Save Proton Clang Cache
+      uses: actions/cache/save@v4
+      if: always() && steps.restore-clang.outputs.cache-hit != 'true'
+      with:
+        path: ~/clang
+        key: proton-clang-spes-v1
+
+    - name: Restore ccache Compilation Objects
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.ccache
+        key: ccache-spes-static
+
+    - name: Fix Kconfig & Inject Serial Lock (cd7276a2)
       run: |
-        # Fix missing driver Kconfig
         mkdir -p drivers/net/wireless/realtek/rt38821cs
         touch drivers/net/wireless/realtek/rt38821cs/Kconfig
 
-        # Clean serial lock injection into init/main.c
         python3 -c '
         with open("init/main.c", "r") as f:
             content = f.read()
 
-        check = "\n\tif (!strstr(boot_command_line, \"cd7276a2\")) {\n\t\tpanic(\"Unauthorized Hardware! Serial mismatch.\");\n\t}\n"
-
-        if "pr_notice(\"Kernel command line: %s\\n\", boot_command_line);" in content:
-            content = content.replace("pr_notice(\"Kernel command line: %s\\n\", boot_command_line);", "pr_notice(\"Kernel command line: %s\\n\", boot_command_line);" + check)
-        elif "setup_arch(&command_line);" in content:
-            content = content.replace("setup_arch(&command_line);", "setup_arch(&command_line);" + check)
+        if "cd7276a2" not in content:
+            import re
+            pattern = r"(static\s+noinline\s+void\s+__init\s+kernel_init_freeable\s*\(\s*void\s*\)\s*\{)"
+            replacement = r"\1\n\tif (!strstr(saved_cmdline, \"cd7276a2\")) {\n\t\tpanic(\"Unauthorized Hardware! Serial mismatch.\");\n\t}"
+            if re.search(pattern, content):
+                content = re.sub(pattern, replacement, content, count=1)
+            else:
+                content = content.replace("kernel_init_freeable(void)\n{", "kernel_init_freeable(void)\n{\n\tif (!strstr(saved_cmdline, \"cd7276a2\")) {\n\t\tpanic(\"Unauthorized Hardware! Serial mismatch.\");\n\t}")
 
         with open("init/main.c", "w") as f:
             f.write(content)
         '
 
-    - name: Compile Kernel
+    - name: Build Kernel Image
       run: |
         export PATH="$HOME/clang/bin:$PATH"
         export USE_CCACHE=1
@@ -79,11 +85,9 @@ jobs:
 
         make -j$(nproc --all) O=out ARCH=arm64 "$DEFCONFIG"
 
-        # Set custom kernel name (-Sitanshu)
         scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu"
         scripts/config --file out/.config --disable IKHEADERS || true
 
-        # Clean Make Command without strict warnings breaking build
         make -j$(nproc --all) O=out \
           ARCH=arm64 \
           CC="ccache clang" \
@@ -91,11 +95,19 @@ jobs:
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
           KCFLAGS="-w -Wno-error" \
-          KCPPFLAGS="-w"
+          KCPPFLAGS="-w" \
+          Image.gz
+
+    - name: Force Save ccache Compilation Objects
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        path: ~/.ccache
+        key: ccache-spes-static
 
     - name: Upload Kernel Artifact
       uses: actions/upload-artifact@v4
       with:
         name: RedmiNote11-Sitanshu-Locked-Kernel
-        path: out/arch/arm64/boot/
+        path: out/arch/arm64/boot/Image.gz
         
