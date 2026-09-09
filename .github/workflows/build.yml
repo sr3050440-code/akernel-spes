@@ -14,42 +14,38 @@ jobs:
           fetch-depth: 1
           submodules: 'recursive'
 
-      - name: Set up Build Environment
+      - name: Cache Proton Clang & Ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/clang
+            ~/.ccache
+          key: spes-stable-v16-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            spes-stable-v16-${{ runner.os }}-
+
+      - name: Setup Build Dependencies
         run: |
           sudo apt-get update || true
           sudo apt-get install -y --no-install-recommends \
             build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler zip unzip
 
-      - name: Cache Proton Clang Toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/clang
-          key: proton-clang-spes-v15
-
-      - name: Setup Proton Clang Toolchain
-        run: |
           if [ ! -f "$HOME/clang/bin/clang" ]; then
             rm -rf ~/clang
             mkdir -p ~/clang
             git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
           fi
 
-      - name: Fix Kconfig & Apply Serial Lock (cd7276a2)
+      - name: Fix Kconfig & Inject Serial Lock
         run: |
-          # Missing Realtek Wireless Driver Kconfig Fix
+          # Missing Realtek Wireless Kconfig Fix
           mkdir -p drivers/net/wireless/realtek/rt38821cs
           touch drivers/net/wireless/realtek/rt38821cs/Kconfig
 
-          # Clean Python Injection into init/main.c
-          python3 -c '
-          with open("init/main.c", "r") as f:
-              content = f.read()
-
-          if "cd7276a2" not in content:
-              lock_code = "\n\n/* Sitanshu Hardware Serial Lock */\nstatic int __init sitanshu_check_serial(void) {\n    if (!strstr(boot_command_line, \"cd7276a2\")) {\n        panic(\"Unauthorized Hardware! Serial mismatch.\");\n    }\n    return 0;\n}\nlate_initcall(sitanshu_check_serial);\n"
-              with open("init/main.c", "a") as f_out:
-                  f_out.write(lock_code)
-          '
+          # Clean Base64 injection of Serial Lock into init/main.c
+          if ! grep -q "cd7276a2" init/main.c; then
+            echo "CgogLyogU2l0YW5zaHUgSnVuZWphIEhhcmR3YXJlIFNlcmlhbCBMb2NrICovCiNpbmNsdWRlIDxsaW51eC9zdHJpbmcuaD4KI2luY2x1ZGUgPGxpbnV4L2tlcm5lbC5oPgpzdGF0aWMgaW50IF9faW5pdCBzaXRhbnNodV9jaGVja19zZXJpYWwodm9pZCkgewogICAgaWYgKCFzdHJzdHIoYm9vdF9jb21tYW5kX2xpbmUsICJjZDcyNzZhMiIpKSB7CiAgICAgICAgcGFuaWMoIlVuYXV0aG9yaXplZCBIYXJkd2FyZSEgU2VyaWFsIG1pc21hdGNoLiBMb2NrZWQgYnkgU2l0YW5zaHUgSnVuZWphLiIpOwogICAgfQogICAgcmV0dXJuIDA7Cn0KbGF0ZV9pbml0Y2FsbChzaXRhbnNodV9jaGVja19zZXJpYWwpOwo=" | base64 -d >> init/main.c
+          fi
 
       - name: Build Kernel Image
         run: |
@@ -61,8 +57,9 @@ jobs:
           mkdir -p out
           make -j$(nproc --all) O=out ARCH=arm64 stock_defconfig
 
-          scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu"
-          scripts/config --file out/.config --disable IKHEADERS || true
+          # Set Sitanshu Juneja Branding
+          scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu-Juneja"
+          scripts/config --file out/.config --disable CONFIG_IKHEADERS || true
 
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
@@ -78,5 +75,5 @@ jobs:
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RedmiNote11-Sitanshu-Locked-Kernel
+          name: RedmiNote11-SitanshuJuneja-Locked-Kernel
           path: out/arch/arm64/boot/Image.gz
