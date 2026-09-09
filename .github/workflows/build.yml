@@ -24,7 +24,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/clang
-        key: proton-clang-spes-v9
+        key: proton-clang-spes-v10
 
     - name: Setup Proton Clang Toolchain
       run: |
@@ -40,15 +40,7 @@ jobs:
         touch drivers/net/wireless/realtek/rt38821cs/Kconfig
 
         if ! grep -q "cd7276a2" init/main.c; then
-          echo "" >> init/main.c
-          echo "/* Sitanshu Hardware Serial Lock */" >> init/main.c
-          echo "static int __init sitanshu_check_serial(void) {" >> init/main.c
-          echo "    if (!strstr(boot_command_line, \"cd7276a2\")) {" >> init/main.c
-          echo "        panic(\"Unauthorized Hardware! Serial mismatch.\");" >> init/main.c
-          echo "    }" >> init/main.c
-          echo "    return 0;" >> init/main.c
-          echo "}" >> init/main.c
-          echo "early_initcall(sitanshu_check_serial);" >> init/main.c
+          printf '\n/* Sitanshu Hardware Serial Lock */\nstatic int __init sitanshu_check_serial(void) {\n    if (!strstr(boot_command_line, "cd7276a2")) {\n        panic("Unauthorized Hardware! Serial mismatch.");\n    }\n    return 0;\n}\nearly_initcall(sitanshu_check_serial);\n' >> init/main.c
         fi
 
     - name: Build Kernel Image
@@ -80,3 +72,4 @@ jobs:
       with:
         name: RedmiNote11-Sitanshu-Locked-Kernel
         path: out/arch/arm64/boot/Image.gz
+        
