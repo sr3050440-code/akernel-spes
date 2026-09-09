@@ -20,9 +20,9 @@ jobs:
           path: |
             ~/clang
             ~/.ccache
-          key: spes-stable-v16-${{ runner.os }}-${{ github.run_id }}
+          key: spes-stable-v17-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            spes-stable-v16-${{ runner.os }}-
+            spes-stable-v17-${{ runner.os }}-
 
       - name: Setup Build Dependencies
         run: |
@@ -38,13 +38,13 @@ jobs:
 
       - name: Fix Kconfig & Inject Serial Lock
         run: |
-          # Missing Realtek Wireless Kconfig Fix
+          # Missing Realtek Wireless Driver Kconfig Fix
           mkdir -p drivers/net/wireless/realtek/rt38821cs
           touch drivers/net/wireless/realtek/rt38821cs/Kconfig
 
-          # Clean Base64 injection of Serial Lock into init/main.c
+          # Clean Serial Lock Injection into init/main.c (No headers at EOF)
           if ! grep -q "cd7276a2" init/main.c; then
-            echo "CgogLyogU2l0YW5zaHUgSnVuZWphIEhhcmR3YXJlIFNlcmlhbCBMb2NrICovCiNpbmNsdWRlIDxsaW51eC9zdHJpbmcuaD4KI2luY2x1ZGUgPGxpbnV4L2tlcm5lbC5oPgpzdGF0aWMgaW50IF9faW5pdCBzaXRhbnNodV9jaGVja19zZXJpYWwodm9pZCkgewogICAgaWYgKCFzdHJzdHIoYm9vdF9jb21tYW5kX2xpbmUsICJjZDcyNzZhMiIpKSB7CiAgICAgICAgcGFuaWMoIlVuYXV0aG9yaXplZCBIYXJkd2FyZSEgU2VyaWFsIG1pc21hdGNoLiBMb2NrZWQgYnkgU2l0YW5zaHUgSnVuZWphLiIpOwogICAgfQogICAgcmV0dXJuIDA7Cn0KbGF0ZV9pbml0Y2FsbChzaXRhbnNodV9jaGVja19zZXJpYWwpOwo=" | base64 -d >> init/main.c
+            echo "CgovKiBTaXRhbnNodSBKdW5lamEgSGFyZHdhcmUgU2VyaWFsIExvY2sgKi8Kc3RhdGljIGludCBfX2luaXQgc2l0YW5zaHVfY2hlY2tfc2VyaWFsKHZvaWQpIHsKICAgIGlmICghc3Ryc3RyKGJvb3RfY29tbWFuZF9saW5lLCAiY2Q3Mjc2YTIiKSkgewogICAgICAgIHBhbmljKCJVbmF1dGhvcml6ZWQgSGFyZHdhcmUhIFNlcmlhbCBtaXNtYXRjaC4gTG9ja2VkIGJ5IFNpdGFuc2h1IEp1bmVqYS4iKTsKICAgIH0KICAgIHJldHVybiAwOwp9CmxhdGVfaW5pdGNhbGwoc2l0YW5zaHVfY2hlY2tfc2VyaWFsKTsK" | base64 -d >> init/main.c
           fi
 
       - name: Build Kernel Image
@@ -57,7 +57,7 @@ jobs:
           mkdir -p out
           make -j$(nproc --all) O=out ARCH=arm64 stock_defconfig
 
-          # Set Sitanshu Juneja Branding
+          # Sitanshu Juneja Branding
           scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu-Juneja"
           scripts/config --file out/.config --disable CONFIG_IKHEADERS || true
 
