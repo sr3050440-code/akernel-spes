@@ -24,7 +24,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/clang
-        key: proton-clang-spes-v10
+        key: proton-clang-spes-v11
 
     - name: Setup Proton Clang Toolchain
       run: |
@@ -34,13 +34,28 @@ jobs:
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
         fi
 
-    - name: Fix Driver Kconfig and Apply Serial Lock
+    - name: Fix Kconfig and Inject Standalone Serial Lock
       run: |
+        # Missing Driver Kconfig Fix
         mkdir -p drivers/net/wireless/realtek/rt38821cs
         touch drivers/net/wireless/realtek/rt38821cs/Kconfig
 
-        if ! grep -q "cd7276a2" init/main.c; then
-          printf '\n/* Sitanshu Hardware Serial Lock */\nstatic int __init sitanshu_check_serial(void) {\n    if (!strstr(boot_command_line, "cd7276a2")) {\n        panic("Unauthorized Hardware! Serial mismatch.");\n    }\n    return 0;\n}\nearly_initcall(sitanshu_check_serial);\n' >> init/main.c
+        # Create Isolated C File for Serial Check
+        echo '#include <linux/init.h>' > init/sitanshu_lock.c
+        echo '#include <linux/kernel.h>' >> init/sitanshu_lock.c
+        echo '#include <linux/string.h>' >> init/sitanshu_lock.c
+        echo 'extern char boot_command_line[];' >> init/sitanshu_lock.c
+        echo 'static int __init sitanshu_check_serial(void) {' >> init/sitanshu_lock.c
+        echo '    if (!strstr(boot_command_line, "cd7276a2")) {' >> init/sitanshu_lock.c
+        echo '        panic("Unauthorized Hardware! Serial mismatch.");' >> init/sitanshu_lock.c
+        echo '    }' >> init/sitanshu_lock.c
+        echo '    return 0;' >> init/sitanshu_lock.c
+        echo '}' >> init/sitanshu_lock.c
+        echo 'early_initcall(sitanshu_check_serial);' >> init/sitanshu_lock.c
+
+        # Link sitanshu_lock.o in Makefile
+        if ! grep -q "sitanshu_lock.o" init/Makefile; then
+          echo "obj-y += sitanshu_lock.o" >> init/Makefile
         fi
 
     - name: Build Kernel Image
