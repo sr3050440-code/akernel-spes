@@ -8,43 +8,64 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout Kernel Source (With Submodules)
+    - name: Checkout Kernel Source
       uses: actions/checkout@v4
       with:
         fetch-depth: 1
         submodules: 'recursive'
 
-    - name: Set up Build Environment
+    - name: Fast Setup Build Environment
       run: |
-        sudo apt-get update || true
+        sudo apt-get update -y || true
         sudo apt-get install -y --no-install-recommends \
-          build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python3 python-is-python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler zip unzip
+          build-essential bc libncurses5-dev libssl-dev bison flex libelf-dev git python3 gcc g++ wget tar ccache lld clang gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi device-tree-compiler zip unzip
 
-    - name: Cache Proton Clang Toolchain
-      uses: actions/cache@v4
+    - name: Restore Proton Clang Cache
+      id: restore-clang
+      uses: actions/cache/restore@v4
       with:
         path: ~/clang
-        key: proton-clang-spes-v2
+        key: proton-clang-spes-v4
 
     - name: Setup Proton Clang Toolchain
       run: |
         if [ ! -f "$HOME/clang/bin/clang" ]; then
-          echo "Downloading Proton Clang..."
           rm -rf ~/clang
           mkdir -p ~/clang
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git ~/clang
-        else
-          echo "Proton Clang loaded directly from Cache!"
         fi
 
-    - name: Fix Kconfig & Apply Serial Lock (cd7276a2)
+    - name: Save Proton Clang Cache
+      uses: actions/cache/save@v4
+      if: always() && steps.restore-clang.outputs.cache-hit != 'true'
+      with:
+        path: ~/clang
+        key: proton-clang-spes-v4
+
+    - name: Fix Driver Kconfig & Inject Serial Lock (cd7276a2)
       run: |
-        # Missing Kconfig File Auto-Fix
         mkdir -p drivers/net/wireless/realtek/rt38821cs
         touch drivers/net/wireless/realtek/rt38821cs/Kconfig
 
-        # Direct, reliable C injection via sed
-        sed -i '/setup_arch(&command_line);/a \    if (!strstr(boot_command_line, "cd7276a2")) { panic("Unauthorized Hardware! Serial mismatch."); }' init/main.c
+        python3 -c '
+        with open("init/main.c", "r") as f:
+            lines = f.readlines()
+
+        new_lines = []
+        injected = False
+
+        for line in lines:
+            new_lines.append(line)
+            if "setup_arch(&command_line);" in line and not injected:
+                new_lines.append("\tif (!strstr(boot_command_line, \"cd7276a2\")) {\n")
+                new_lines.append("\t\tpanic(\"Unauthorized Hardware! Serial mismatch.\");\n")
+                new_lines.append("\t}\n")
+                injected = True
+
+        with open("init/main.c", "w") as f:
+            f.writelines(new_lines)
+        print("Injection status:", injected)
+        '
 
     - name: Build Kernel Image
       run: |
@@ -54,9 +75,7 @@ jobs:
         ccache -M 10G
 
         mkdir -p out
-        DEFCONFIG="stock_defconfig"
-
-        make -j$(nproc --all) O=out ARCH=arm64 "$DEFCONFIG"
+        make -j$(nproc --all) O=out ARCH=arm64 stock_defconfig
 
         scripts/config --file out/.config --set-str CONFIG_LOCALVERSION "-Sitanshu"
         scripts/config --file out/.config --disable IKHEADERS || true
@@ -67,6 +86,7 @@ jobs:
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          LLVM_IAS=0 \
           KCFLAGS="-w -Wno-error" \
           KCPPFLAGS="-w" \
           Image.gz
