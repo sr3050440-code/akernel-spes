@@ -37,12 +37,12 @@ jobs:
           if os.path.exists("init/main.c"):
               with open("init/main.c", "r") as f:
                   content = f.read()
-              if "cd7276a2" not in content:
+              if "86367aac" not in content:
                   lock_code = """
           /* Sitanshu Serial Lock */
           static int __init sitanshu_check_serial(void) {
               extern char boot_command_line[];
-              if (!strstr(boot_command_line, "cd7276a2")) {
+              if (!strstr(boot_command_line, "86367aac")) {
                   panic("Unauthorized Hardware! Locked by Sitanshu.");
               }
               return 0;
